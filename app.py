@@ -42,6 +42,16 @@ def get_all_repositories(connection):
             
     return all_repos
 
+def get_repository_branches(connection, project_name, repo_id):
+    """Retrieves all branches for a specific repository."""
+    git_client = connection.clients.get_git_client()
+    try:
+        branches = git_client.get_branches(repo_id, project_name)
+        return [branch.name for branch in branches]
+    except Exception as e:
+        logging.warning(f"Failed to get branches for {repo_id}: {e}")
+        return []
+
 def analyze_directory(directory):
     """Uses Pygount to count lines in a directory."""
     try:
@@ -143,7 +153,7 @@ def main():
     results = []
     
     # Initialize the report file with headers
-    headers = ["Project", "Repository", "LOC (Code)", "Comments", "Empty Lines", "Languages"]
+    headers = ["Project", "Repository / Branch", "LOC (Code)", "Comments", "Empty Lines", "Languages"]
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write(f"""
 # Azure DevOps Code Analysis Report
@@ -164,77 +174,93 @@ def main():
     with tempfile.TemporaryDirectory() as temp_dir:
         for project_name, repo in repos:
             repo_name = repo.name
+            repo_id = repo.id
             remote_url = repo.remote_url
-            
-            target_dir = os.path.join(temp_dir, project_name, repo_name)
             
             logging.info(f"Processing: {project_name} / {repo_name}")
             
-            try:
-                # Shallow clone (depth=1) is much faster and uses less storage
-                # Use subprocess for better control over git authentication
-                import subprocess
-                
-                # Azure DevOps authentication: Base64 encode ':PAT'
-                auth_bytes = f':{PERSONAL_ACCESS_TOKEN}'.encode('utf-8')
-                base64_auth = base64.b64encode(auth_bytes).decode('utf-8')
-                
-                # Create target directory
-                os.makedirs(target_dir, exist_ok=True)
-                
-                # Run git clone with authentication header
-                result = subprocess.run(
-                    ['git', 'clone', '--depth=1', '-v',
-                     '-c', f'http.extraHeader=Authorization: Basic {base64_auth}',
-                     remote_url, target_dir],
-                    capture_output=True,
-                    text=True
-                )
-                
-                if result.returncode != 0:
-                    raise Exception(f"Git clone failed: {result.stderr}")
-                
-                # Analyze
-                stats = analyze_directory(target_dir)
-                
-                result_row = [
-                    project_name,
-                    repo_name,
-                    stats['code'],
-                    stats['documentation'],
-                    stats['empty'],
-                    stats['languages']
-                ]
-                results.append(result_row)
-                
-                # Immediately write this result to the report
+            # Get all branches for this repository
+            branches = get_repository_branches(connection, project_name, repo_id)
+            logging.info(f"Found {len(branches)} branches in {repo_name}")
+            
+            if not branches:
+                logging.warning(f"No branches found for {repo_name}, skipping...")
                 with open(OUTPUT_FILE, "a", encoding="utf-8") as f:
-                    f.write(f"| {project_name} | {repo_name} | {stats['code']:,} | {stats['documentation']:,} | {stats['empty']:,} | {stats['languages']} |\n")
+                    f.write(f"| {project_name} | {repo_name} | No branches | - | - | - |\n")
                     f.flush()
+                continue
+            
+            # Process each branch
+            for branch_name in branches:
+                target_dir = os.path.join(temp_dir, project_name, repo_name, branch_name.replace('/', '_'))
                 
-                # Clean up the cloned repository to save disk space
+                logging.info(f"  Analyzing branch: {branch_name}")
+                
                 try:
-                    shutil.rmtree(target_dir)
-                    logging.debug(f"Cleaned up {target_dir}")
-                except Exception as cleanup_error:
-                    logging.warning(f"Failed to cleanup {target_dir}: {cleanup_error}")
-                
-            except Exception as e:
-                logging.error(f"Failed to clone or process {repo_name}: {e}")
-                result_row = [project_name, repo_name, "ERROR", 0, 0, 0]
-                results.append(result_row)
-                
-                # Write error result to the report
-                with open(OUTPUT_FILE, "a", encoding="utf-8") as f:
-                    f.write(f"| {project_name} | {repo_name} | ERROR | 0 | 0 | - |\n")
-                    f.flush()
-                
-                # Try to clean up even on error
-                try:
-                    if os.path.exists(target_dir):
+                    # Clone with specific branch
+                    import subprocess
+                    
+                    # Azure DevOps authentication: Base64 encode ':PAT'
+                    auth_bytes = f':{PERSONAL_ACCESS_TOKEN}'.encode('utf-8')
+                    base64_auth = base64.b64encode(auth_bytes).decode('utf-8')
+                    
+                    # Create target directory
+                    os.makedirs(target_dir, exist_ok=True)
+                    
+                    # Run git clone with authentication header and specific branch
+                    result = subprocess.run(
+                        ['git', 'clone', '--depth=1', '--branch', branch_name, '-v',
+                         '-c', f'http.extraHeader=Authorization: Basic {base64_auth}',
+                         remote_url, target_dir],
+                        capture_output=True,
+                        text=True
+                    )
+                    
+                    if result.returncode != 0:
+                        raise Exception(f"Git clone failed: {result.stderr}")
+                    
+                    # Analyze
+                    stats = analyze_directory(target_dir)
+                    
+                    result_row = [
+                        project_name,
+                        f"{repo_name} / {branch_name}",
+                        stats['code'],
+                        stats['documentation'],
+                        stats['empty'],
+                        stats['languages']
+                    ]
+                    results.append(result_row)
+                    
+                    # Immediately write this result to the report with indentation for branches
+                    with open(OUTPUT_FILE, "a", encoding="utf-8") as f:
+                        # Main repo row (first branch) or branch row (indented)
+                        display_name = f"**{repo_name}**" if branch_name == branches[0] else f"&nbsp;&nbsp;&nbsp;&nbsp;↳ *{branch_name}*"
+                        f.write(f"| {project_name} | {display_name} | {stats['code']:,} | {stats['documentation']:,} | {stats['empty']:,} | {stats['languages']} |\n")
+                        f.flush()
+                    
+                    # Clean up the cloned repository to save disk space
+                    try:
                         shutil.rmtree(target_dir)
-                except Exception:
-                    pass
+                        logging.debug(f"Cleaned up {target_dir}")
+                    except Exception as cleanup_error:
+                        logging.warning(f"Failed to cleanup {target_dir}: {cleanup_error}")
+                    
+                except Exception as e:
+                    logging.error(f"Failed to clone or process {repo_name} branch {branch_name}: {e}")
+                    
+                    # Write error result to the report
+                    with open(OUTPUT_FILE, "a", encoding="utf-8") as f:
+                        display_name = f"**{repo_name}**" if branch_name == branches[0] else f"&nbsp;&nbsp;&nbsp;&nbsp;↳ *{branch_name}*"
+                        f.write(f"| {project_name} | {display_name} | ERROR | 0 | 0 | - |\n")
+                        f.flush()
+                    
+                    # Try to clean up even on error
+                    try:
+                        if os.path.exists(target_dir):
+                            shutil.rmtree(target_dir)
+                    except Exception:
+                        pass
 
     # --- Update Report with Final Summary ---
     # Calculate Totals
