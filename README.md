@@ -7,9 +7,12 @@ A Python application that scans all repositories across an Azure DevOps organiza
 - Scans all repositories across all projects in an Azure DevOps organization
 - Analyzes code using Pygount with support for multiple languages
 - Custom parser for Business Central AL files
+- Intelligent JSON classification (separates configuration files from data files)
 - Generates detailed markdown report with language statistics
+- Exports CSV file with per-language breakdowns for data analysis
 - Real-time incremental reporting
 - Automatic cleanup after each repository scan
+- Comprehensive logging to file with configurable levels
 
 ## Prerequisites
 
@@ -44,12 +47,18 @@ A Python application that scans all repositories across an Azure DevOps organiza
    ORGANIZATION_URL=https://dev.azure.com/your-organization
    PERSONAL_ACCESS_TOKEN=your-pat-token-here
    OUTPUT_FILE=code_analysis_report.md
+   CSV_OUTPUT_FILE=code_analysis_report.csv
+   LOG_FILE=/tmp/azuredevops_scan.log
+   LOG_LEVEL=INFO
    ```
 
 2. **Replace the values**:
    - `ORGANIZATION_URL`: Your Azure DevOps organization URL
    - `PERSONAL_ACCESS_TOKEN`: Your Azure DevOps PAT (requires Code > Read permission)
-   - `OUTPUT_FILE`: (Optional) Output filename for the report (default: code_analysis_report.md)
+   - `OUTPUT_FILE`: (Optional) Output filename for the markdown report (default: code_analysis_report.md)
+   - `CSV_OUTPUT_FILE`: (Optional) Output filename for the CSV report (default: code_analysis_report.csv)
+   - `LOG_FILE`: (Optional) Path to log file (default: /tmp/azuredevops_scan.log)
+   - `LOG_LEVEL`: (Optional) Logging level - DEBUG, INFO, WARNING, ERROR, CRITICAL (default: INFO)
 
 ## Usage
 
@@ -65,16 +74,21 @@ A Python application that scans all repositories across an Azure DevOps organiza
 
 3. **View the results**
    
-   The application will generate a markdown report (`code_analysis_report.md` by default) containing:
-   - Total repository count
-   - Lines of code per repository
-   - Comment lines
-   - Empty lines
-   - Programming languages used
+   The application will generate two reports:
+   - **Markdown report** (`code_analysis_report.md` by default) containing:
+     - Total repository count
+     - Lines of code per repository
+     - Comment lines
+     - Empty lines
+     - Programming languages used
+   - **CSV report** (`code_analysis_report.csv` by default) containing:
+     - One row per Project/Repository/Language combination
+     - Columns: Project, Repository, Language, LOC (Code), Comments, Empty Lines
+     - Suitable for data analysis and visualization in Excel, Power BI, etc.
 
 ## Output Example
 
-The report includes a table with columns:
+The markdown report includes a table with columns:
 - Project name
 - Repository name
 - Lines of Code (LOC)
@@ -82,9 +96,22 @@ The report includes a table with columns:
 - Empty lines
 - Languages detected
 
+The CSV report contains one row per Project/Repository/Language combination:
+```csv
+Project;Repository;Language;LOC (Code);Comments;Empty Lines
+BSN_Central;BSN_Central;JSON (config);15234;0;2341
+BSN_Central;BSN_Central;Markdown;345;123;456
+BSN_Central;Source_Code_Prod;AL;195253;6788;20061
+```
+
 ## Notes
 
 - The tool uses shallow clones (`--depth=1`) to optimize performance and disk space
 - Temporary directories are cleaned up after each repository scan
 - Pseudo-languages (`__binary__`, `__error__`, `__unknown__`, etc.) are filtered from statistics
 - AL (Business Central) files are parsed with a custom analyzer
+- JSON files are intelligently classified as configuration or data
+  - Data JSON files (large arrays, >100KB, containing 'data'/'export'/'dump' in filename) are excluded
+  - Configuration JSON files are labeled as "JSON (config)" in reports
+- CSV output uses semicolon (`;`) as delimiter for European locale compatibility
+- Log files are cleared at the start of each run
