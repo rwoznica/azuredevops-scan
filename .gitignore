@@ -4,6 +4,9 @@
 # Report files
 code_analysis_report*
 
+# LLM-generated descriptions
+repository_descriptions/
+
 # Python virtual environment
 env/
 venv/

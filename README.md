@@ -8,6 +8,11 @@ A Python application that scans all repositories across an Azure DevOps organiza
 - Analyzes code using Pygount with support for multiple languages
 - Custom parser for Business Central AL files
 - Intelligent JSON classification (separates configuration files from data files)
+- **AI-powered repository documentation** using Claude 3.5 Sonnet or Gemini 2.0 Flash (optional)
+  - Automatically generates comprehensive descriptions for each repository
+  - Analyzes code structure, architecture, and technologies
+  - Creates individual README files with AI insights
+  - Choice between Claude (higher quality) or Gemini (faster, cheaper)
 - Generates detailed markdown report with language statistics
 - Exports CSV file with per-language breakdowns for data analysis
 - Real-time incremental reporting
@@ -50,6 +55,16 @@ A Python application that scans all repositories across an Azure DevOps organiza
    CSV_OUTPUT_FILE=code_analysis_report.csv
    LOG_FILE=/tmp/azuredevops_scan.log
    LOG_LEVEL=INFO
+   
+   # LLM Configuration (Optional - for AI-powered repository descriptions)
+   LLM_ENABLED=false
+   LLM_PROVIDER=gemini
+   LLM_API_KEY=your-api-key
+   LLM_MODEL=gemini-2.0-flash-exp
+   LLM_PROMPT=Analyze this repository and provide: 1) Purpose and main functionality, 2) Technology stack and programming languages used, 3) Key components and architecture, 4) Main dependencies and integrations, 5) Notable patterns, features, or technical debt. Be concise but comprehensive. Format as markdown with clear sections.
+   LLM_OUTPUT_DIR=./repository_descriptions
+   LLM_MAX_FILES=50
+   LLM_MAX_TOKENS=100000
    ```
 
 2. **Replace the values**:
@@ -59,6 +74,18 @@ A Python application that scans all repositories across an Azure DevOps organiza
    - `CSV_OUTPUT_FILE`: (Optional) Output filename for the CSV report (default: code_analysis_report.csv)
    - `LOG_FILE`: (Optional) Path to log file (default: /tmp/azuredevops_scan.log)
    - `LOG_LEVEL`: (Optional) Logging level - DEBUG, INFO, WARNING, ERROR, CRITICAL (default: INFO)
+   - `LLM_ENABLED`: (Optional) Enable AI-powered descriptions - true/false (default: false)
+   - `LLM_PROVIDER`: (Optional) AI provider - 'gemini' or 'anthropic' (default: gemini)
+   - `LLM_API_KEY`: (Required if LLM_ENABLED=true) 
+     - For Gemini: Get from https://aistudio.google.com/apikey
+     - For Claude: Get from https://console.anthropic.com/
+   - `LLM_MODEL`: (Optional) Model to use
+     - Gemini: gemini-2.0-flash-exp (default), gemini-1.5-pro, gemini-1.5-flash
+     - Claude: claude-3-5-sonnet-20241022, claude-3-opus-20240229
+   - `LLM_PROMPT`: (Optional) Custom prompt for repository analysis
+   - `LLM_OUTPUT_DIR`: (Optional) Directory for AI-generated descriptions (default: ./repository_descriptions)
+   - `LLM_MAX_FILES`: (Optional) Max files to analyze per repo (default: 50)
+   - `LLM_MAX_TOKENS`: (Optional) Max context tokens per analysis (default: 100000)
 
 ## Usage
 
@@ -98,11 +125,13 @@ The markdown report includes a table with columns:
 
 The CSV report contains one row per Project/Repository/Language combination:
 ```csv
-Project;Repository;Language;LOC (Code);Comments;Empty Lines
-BSN_Central;BSN_Central;JSON (config);15234;0;2341
-BSN_Central;BSN_Central;Markdown;345;123;456
-BSN_Central;Source_Code_Prod;AL;195253;6788;20061
+Project;Repository;Language;LOC (Code);Comments;Empty Lines;AI_Description_Generated
+BSN_Central;BSN_Central;JSON (config);15234;0;2341;Yes
+BSN_Central;BSN_Central;Markdown;345;123;456;
+BSN_Central;Source_Code_Prod;AL;195253;6788;20061;Yes
 ```
+
+When LLM is enabled, individual repository descriptions are saved to `./repository_descriptions/README-{project}-{repository}.md`
 
 ## Notes
 
@@ -115,3 +144,23 @@ BSN_Central;Source_Code_Prod;AL;195253;6788;20061
   - Configuration JSON files are labeled as "JSON (config)" in reports
 - CSV output uses semicolon (`;`) as delimiter for European locale compatibility
 - Log files are cleared at the start of each run
+
+### AI-Powered Repository Descriptions
+
+When `LLM_ENABLED=true`:
+- **Two provider options:**
+  - **Gemini 2.0 Flash** (default): Faster, cheaper ($0.075/$0.30 per 1M tokens), 1M token context, 1,500 RPM
+  - **Claude 3.5 Sonnet**: Higher quality prose ($3/$15 per 1M tokens), 200K context, 50 RPM
+- Collects up to 50 most important files (README, configs, main code files)
+- Generates structured analysis including purpose, tech stack, architecture, and dependencies
+- Saves individual markdown files to `./repository_descriptions/`
+- Adds "AI_Description_Generated" column to CSV export
+- **Cost for 124 repos**: 
+  - Gemini: ~$1-2
+  - Claude: ~$10-20
+- **Time**: 
+  - Gemini: ~2-3 seconds per repository
+  - Claude: ~3-5 seconds per repository
+- **Setup**:
+  - Gemini: Get free API key from https://aistudio.google.com/apikey
+  - Claude: Get API key from https://console.anthropic.com/
